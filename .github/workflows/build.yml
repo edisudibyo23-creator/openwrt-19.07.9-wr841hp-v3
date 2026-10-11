@@ -1,0 +1,99 @@
+name: Build experimental OpenWrt 19.07.9
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "patches/**"
+      - "files/**"
+      - "scripts/**"
+      - ".github/workflows/build.yml"
+      - "config.seed"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wr841hp-v3-backport
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib \
+            gettext git libncurses-dev libssl-dev python3-distutils \
+            rsync unzip zlib1g-dev file wget curl patch perl \
+            cpio ecj fastjar java-propose-classpath
+      - name: Fetch OpenWrt 19.07.9 source
+        run: |
+          git clone --depth 1 --branch v19.07.9 https://github.com/openwrt/openwrt.git openwrt
+          cd openwrt
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git status --short
+      - name: Apply local backport patches
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          patches=(patches/*.patch)
+          if [ ${#patches[@]} -eq 0 ]; then
+            echo "::error::Folder patches/ kosong. Tambahkan patch perangkat yang sudah diaudit; build dihentikan agar tidak menghasilkan firmware tanpa dukungan."
+            exit 1
+          fi
+          cd openwrt
+          for p in "${patches[@]}"; do
+            echo "Applying $p"
+            patch --batch --forward -p1 < "../$p"
+          done
+      - name: Update feeds and install package definitions
+        run: |
+          set -euo pipefail
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+      - name: Validate target, device profile, and openNDS
+        run: |
+          set -euo pipefail
+          ./scripts/validate-backport.sh openwrt
+      - name: Configure firmware
+        run: |
+          set -euo pipefail
+          cd openwrt
+          cp ../config.seed .config
+          make defconfig
+          ../scripts/validate-config.sh .config
+      - name: Build toolchain and firmware
+        run: |
+          set -euo pipefail
+          cd openwrt
+          make -j"$(nproc)" V=s
+      - name: Verify output and size
+        run: |
+          set -euo pipefail
+          cd openwrt
+          ../scripts/verify-images.sh bin/targets/ath79/generic
+      - name: Package logs and firmware
+        if: success()
+        run: |
+          mkdir -p artifact
+          cp -av openwrt/bin/targets/ath79/generic/* artifact/
+          cp -av openwrt/.config artifact/build.config
+          printf 'OpenWrt source commit: %s\n' "$SOURCE_COMMIT" > artifact/BUILD-INFO.txt
+          printf 'Experimental backport; not verified on hardware.\n' >> artifact/BUILD-INFO.txt
+          (cd artifact && sha256sum *.bin > SHA256SUMS.txt)
+      - name: Upload firmware artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wr841hp-v3-openwrt-19.07.9-experimental
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14
