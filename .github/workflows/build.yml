@@ -69,7 +69,7 @@ jobs:
 
           s = leds.read_text()
           old = "tplink,archer-c60-v3)"
-          new = "tplink,archer-c60-v3|\\\n\\ttplink,tl-wr841hp-v3)"
+          new = """tplink,archer-c60-v3|\\\n\ttplink,tl-wr841hp-v3)"""
           if "tplink,tl-wr841hp-v3)" not in s:
               if old not in s:
                   raise SystemExit("::error::Cannot locate LED board case anchor in 19.07.9")
@@ -78,7 +78,7 @@ jobs:
 
           s = network.read_text()
           old = "qca,ap143-16m)"
-          new = "qca,ap143-16m|\\\n\\ttplink,tl-wr841hp-v3)"
+          new = """qca,ap143-16m|\\\n\ttplink,tl-wr841hp-v3)"""
           if "tplink,tl-wr841hp-v3)" not in s:
               if old not in s:
                   raise SystemExit("::error::Cannot locate network board case anchor in 19.07.9")
