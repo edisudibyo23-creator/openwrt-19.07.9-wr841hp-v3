@@ -1,0 +1,11 @@
+# Minimal experiment seed. This is not proof the target/profile exists.
+CONFIG_TARGET_ath79=y
+CONFIG_TARGET_ath79_generic=y
+CONFIG_TARGET_ath79_generic_DEVICE_tplink_tl-wr841hp-v3=y
+
+# Keep the image small. Select the actual device profile only after
+# the backport has generated/registered it in the 19.07.9 build system.
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_opennds=y
+
+# Do not add optional packages until a baseline build fits in 8 MB flash.
