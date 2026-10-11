@@ -83,7 +83,7 @@ jobs:
                   if "tplink,archer-c60-v3|" in line:
                       # Insert into the existing TP-Link switch-layout case.
                       # The device is another alternative in the same case.
-                      lines.insert(i + 1, "\\ttplink,tl-wr841hp-v3|\\\\\\n")
+                      lines.insert(i + 1, chr(9) + "tplink,tl-wr841hp-v3|" + chr(92) + chr(10))
                       break
               else:
                   raise SystemExit("::error::Cannot locate TP-Link network case group in 19.07.9")
