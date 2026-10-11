@@ -77,13 +77,17 @@ jobs:
               leds.write_text(s)
 
           s = network.read_text()
-          old = "qca,ap143-16m)"
-          new = """qca,ap143-16m|\\\n\ttplink,tl-wr841hp-v3)"""
-          if "tplink,tl-wr841hp-v3)" not in s:
-              if old not in s:
-                  raise SystemExit("::error::Cannot locate network board case anchor in 19.07.9")
-              s = s.replace(old, new, 1)
-              network.write_text(s)
+          if "tplink,tl-wr841hp-v3" not in s:
+              lines = s.splitlines(keepends=True)
+              for i, line in enumerate(lines):
+                  if "tplink,archer-c60-v3|" in line:
+                      # Insert into the existing TP-Link switch-layout case.
+                      # The device is another alternative in the same case.
+                      lines.insert(i + 1, "\\ttplink,tl-wr841hp-v3|\\\\\\n")
+                      break
+              else:
+                  raise SystemExit("::error::Cannot locate TP-Link network case group in 19.07.9")
+              network.write_text("".join(lines))
 
           s = image.read_text()
           if "define Device/tplink_tl-wr841hp-v3" not in s:
