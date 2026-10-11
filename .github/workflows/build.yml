@@ -39,31 +39,73 @@ jobs:
           cd openwrt
           echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           git status --short
-      - name: Fetch and attempt upstream device-support backport
+      - name: Backport device files to the 19.07.9 layout
         env:
           DEVICE_SUPPORT_COMMIT: c5235f6b2441a6b531622b76b66c354896c0dae0
         run: |
           set -euo pipefail
           cd openwrt
-          # Fetch the upstream commit that introduced official device support.
-          # This is an attempt to port the real change, not a guarantee it applies
-          # cleanly to the older 19.07.9 tree.
           git fetch --no-tags --depth=2 origin "$DEVICE_SUPPORT_COMMIT"
-          git show --format= --binary "$DEVICE_SUPPORT_COMMIT" -- target/linux/ath79 > ../device-support-upstream.patch
-          test -s ../device-support-upstream.patch || {
-            echo "::error::Upstream commit contained no ath79 patch; inspect the commit and update the backport source."
-            exit 1
-          }
-          echo "Generated patch from upstream device-support commit:"
-          sed -n '1,100p' ../device-support-upstream.patch
-          if git apply --check ../device-support-upstream.patch; then
-            git apply ../device-support-upstream.patch
-            echo "Upstream ath79 patch applied cleanly."
-          else
-            echo "::error::The upstream device patch does not apply cleanly to OpenWrt 19.07.9. Port the DTS, image recipe and target registration manually; do not skip this failure."
-            exit 1
-          fi
-          # Optional user patches are applied after the upstream patch.
+
+          # Apply only the new DTS from the upstream support commit. The full
+          # commit does not apply to 19.07.9 because board.d paths and image
+          # recipe context changed between branches.
+          git show --format= --binary "$DEVICE_SUPPORT_COMMIT" -- target/linux/ath79/dts/qca9533_tplink_tl-wr841hp-v3.dts > /tmp/wr841hp-dts.patch
+          test -s /tmp/wr841hp-dts.patch
+          git apply --check /tmp/wr841hp-dts.patch
+          git apply /tmp/wr841hp-dts.patch
+
+          # Port the board defaults to the 19.07.9 base-files paths.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          leds = Path("target/linux/ath79/base-files/etc/board.d/01_leds")
+          network = Path("target/linux/ath79/base-files/etc/board.d/02_network")
+          image = Path("target/linux/ath79/image/generic-tp-link.mk")
+
+          for p in (leds, network, image):
+              if not p.is_file():
+                  raise SystemExit(f"::error::Expected 19.07.9 file missing: {p}")
+
+          s = leds.read_text()
+          old = "tplink,archer-c60-v3)"
+          new = "tplink,archer-c60-v3|\\\n\\ttplink,tl-wr841hp-v3)"
+          if "tplink,tl-wr841hp-v3)" not in s:
+              if old not in s:
+                  raise SystemExit("::error::Cannot locate LED board case anchor in 19.07.9")
+              s = s.replace(old, new, 1)
+              leds.write_text(s)
+
+          s = network.read_text()
+          old = "qca,ap143-16m)"
+          new = "qca,ap143-16m|\\\n\\ttplink,tl-wr841hp-v3)"
+          if "tplink,tl-wr841hp-v3)" not in s:
+              if old not in s:
+                  raise SystemExit("::error::Cannot locate network board case anchor in 19.07.9")
+              s = s.replace(old, new, 1)
+              network.write_text(s)
+
+          s = image.read_text()
+          if "define Device/tplink_tl-wr841hp-v3" not in s:
+              anchor = "define Device/tplink_tl-wr810n-v2"
+              if anchor not in s:
+                  raise SystemExit("::error::Cannot locate TP-Link 8 MB image recipe anchor")
+              recipe = """define Device/tplink_tl-wr841hp-v3
+            $(Device/tplink-8mlzma)
+            ATH_SOC := qca9533
+            DEVICE_TITLE := TP-Link TL-WR841HP v3
+            TPLINK_HWID := 0x08411003
+            SUPPORTED_DEVICES += tplink,tl-wr841hp-v3
+          endef
+          TARGET_DEVICES += tplink_tl-wr841hp-v3
+
+          """
+              s = s.replace(anchor, recipe + anchor, 1)
+              image.write_text(s)
+          PY
+
+          # Optional repository-specific patches are applied after the base
+          # backport; an empty patches/ directory is now valid.
           shopt -s nullglob
           patches=(../patches/*.patch)
           for p in "${patches[@]}"; do
@@ -71,6 +113,9 @@ jobs:
             git apply --check "$p"
             git apply "$p"
           done
+
+          echo "Backport files staged in source tree:"
+          git status --short
       - name: Update feeds and install package definitions
         run: |
           set -euo pipefail
