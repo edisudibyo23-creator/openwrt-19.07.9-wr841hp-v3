@@ -39,19 +39,37 @@ jobs:
           cd openwrt
           echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           git status --short
-      - name: Apply local backport patches
+      - name: Fetch and attempt upstream device-support backport
+        env:
+          DEVICE_SUPPORT_COMMIT: c5235f6b2441a6b531622b76b66c354896c0dae0
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          patches=(patches/*.patch)
-          if [ ${#patches[@]} -eq 0 ]; then
-            echo "::error::Folder patches/ kosong. Tambahkan patch perangkat yang sudah diaudit; build dihentikan agar tidak menghasilkan firmware tanpa dukungan."
+          cd openwrt
+          # Fetch the upstream commit that introduced official device support.
+          # This is an attempt to port the real change, not a guarantee it applies
+          # cleanly to the older 19.07.9 tree.
+          git fetch --no-tags --depth=2 origin "$DEVICE_SUPPORT_COMMIT"
+          git show --format= --binary "$DEVICE_SUPPORT_COMMIT" -- target/linux/ath79 > ../device-support-upstream.patch
+          test -s ../device-support-upstream.patch || {
+            echo "::error::Upstream commit contained no ath79 patch; inspect the commit and update the backport source."
+            exit 1
+          }
+          echo "Generated patch from upstream device-support commit:"
+          sed -n '1,100p' ../device-support-upstream.patch
+          if git apply --check ../device-support-upstream.patch; then
+            git apply ../device-support-upstream.patch
+            echo "Upstream ath79 patch applied cleanly."
+          else
+            echo "::error::The upstream device patch does not apply cleanly to OpenWrt 19.07.9. Port the DTS, image recipe and target registration manually; do not skip this failure."
             exit 1
           fi
-          cd openwrt
+          # Optional user patches are applied after the upstream patch.
+          shopt -s nullglob
+          patches=(../patches/*.patch)
           for p in "${patches[@]}"; do
-            echo "Applying $p"
-            patch --batch --forward -p1 < "../$p"
+            echo "Applying additional patch $p"
+            git apply --check "$p"
+            git apply "$p"
           done
       - name: Update feeds and install package definitions
         run: |
